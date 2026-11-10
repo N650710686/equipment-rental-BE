@@ -55,9 +55,9 @@ func (h *Handler) CreateBorrow(w http.ResponseWriter, r *http.Request) {
 	case from.Before(today()):
 		writeError(w, http.StatusBadRequest, "BAD_DATE", "วันที่ยืมต้องไม่ใช่วันที่ผ่านมาแล้ว")
 		return
-	case to.Before(from):
-		writeError(w, http.StatusBadRequest, "BAD_DATE", "วันที่คืนต้องไม่ก่อนวันที่ยืม")
-		return
+	case !to.After(from):
+    	writeError(w, http.StatusBadRequest, "BAD_DATE", "วันที่คืนต้องอยู่หลังวันที่ยืม")
+    	return
 	}
 	b, err := h.Store.CreateBorrowRequest(r.Context(), memberID, req.EquipmentID, req.Quantity, req.BorrowDate, req.ReturnDate)
 	if errors.Is(err, store.ErrNotFound) {

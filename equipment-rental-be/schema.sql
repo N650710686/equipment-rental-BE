@@ -21,6 +21,7 @@ CREATE TABLE equipment (
     image_url      VARCHAR(500),
     total_qty      INT           NOT NULL CHECK (total_qty >= 0),      -- จำนวนทั้งหมดในคลัง
     available_qty  INT           NOT NULL CHECK (available_qty >= 0),  -- จำนวนที่ยังว่างให้ยืม
+    is_active      BOOLEAN       NOT NULL DEFAULT true,                -- false = เลิกใช้งาน/ซ่อนจากระบบ (ปุ่มลบของ admin ทำแค่นี้ ไม่ลบแถวจริง)
     created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
     CONSTRAINT ck_equipment_stock CHECK (available_qty <= total_qty)
@@ -30,8 +31,9 @@ CREATE TABLE equipment (
 --        pending -> rejected (ปฏิเสธ, ไม่แตะสต็อก)
 CREATE TABLE borrow_requests (
     id            BIGSERIAL    PRIMARY KEY,
-    member_id     BIGINT       NOT NULL REFERENCES members(id)   ON DELETE CASCADE,
-    equipment_id  BIGINT       NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+    -- RESTRICT: ห้ามลบสมาชิก/อุปกรณ์ที่มีประวัติการยืม เพื่อเก็บประวัติให้ครบ (ซ่อนอุปกรณ์ด้วย is_active แทน)
+    member_id     BIGINT       NOT NULL REFERENCES members(id)   ON DELETE RESTRICT,
+    equipment_id  BIGINT       NOT NULL REFERENCES equipment(id) ON DELETE RESTRICT,
     quantity      INT          NOT NULL DEFAULT 1 CHECK (quantity >= 1),
     borrow_date   DATE         NOT NULL,
     return_date   DATE         NOT NULL,

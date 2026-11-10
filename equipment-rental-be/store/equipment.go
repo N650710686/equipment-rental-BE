@@ -47,9 +47,10 @@ func scanEquipment(row scanner) (Equipment, error) {
 func (s *Store) ListEquipment(ctx context.Context, q string) ([]Equipment, error) {
 	rows, err := s.Pool.Query(ctx,
 		`SELECT `+equipCols+` FROM equipment
-		 WHERE $1::text = ''
-		    OR lower(name) LIKE '%' || lower($1::text) || '%'
-		    OR lower(coalesce(category, '')) LIKE '%' || lower($1::text) || '%'
+		 WHERE is_active
+		   AND ($1::text = ''
+		        OR lower(name) LIKE '%' || lower($1::text) || '%'
+		        OR lower(coalesce(category, '')) LIKE '%' || lower($1::text) || '%')
 		 ORDER BY name, id`, q)
 	if err != nil {
 		return nil, err
@@ -68,7 +69,7 @@ func (s *Store) ListEquipment(ctx context.Context, q string) ([]Equipment, error
 
 func (s *Store) GetEquipment(ctx context.Context, id int64) (Equipment, error) {
 	e, err := scanEquipment(s.Pool.QueryRow(ctx,
-		`SELECT `+equipCols+` FROM equipment WHERE id = $1`, id))
+		`SELECT `+equipCols+` FROM equipment WHERE id = $1 AND is_active`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Equipment{}, ErrNotFound
 	}
@@ -93,7 +94,7 @@ func (s *Store) UpdateEquipment(ctx context.Context, id int64, in EquipmentInput
 		        available_qty = available_qty + ($6 - total_qty),
 		        total_qty = $6,
 		        updated_at = now()
-		  WHERE id = $1
+		  WHERE id = $1 AND is_active
 		  RETURNING `+equipCols,
 		id, in.Name, in.Description, in.Category, in.ImageURL, in.TotalQty))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -106,18 +107,25 @@ func (s *Store) UpdateEquipment(ctx context.Context, id int64, in EquipmentInput
 	return e, err
 }
 
-// DeleteEquipment ลบได้เมื่อไม่มีคำขอที่ยังค้าง (pending/approved) ประวัติที่คืนแล้วจะถูกลบตามไปด้วย (ON DELETE CASCADE)
+// DeleteEquipment = ซ่อนอุปกรณ์ (soft delete: is_active = false) ไม่ลบแถวจริง ประวัติการยืมจึงอยู่ครบ
+// ซ่อนได้เมื่อไม่มีคำขอที่ยังค้าง (pending/approved) ล็อกอุปกรณ์ก่อน (FOR UPDATE) กันมีคนส่งคำขอใหม่แทรกระหว่างตรวจ
 func (s *Store) DeleteEquipment(ctx context.Context, id int64) error {
-	var exists bool
-	if err := s.Pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM equipment WHERE id = $1)`, id).Scan(&exists); err != nil {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
 		return err
 	}
-	if !exists {
+	defer tx.Rollback(ctx)
+
+	var one int
+	err = tx.QueryRow(ctx, `SELECT 1 FROM equipment WHERE id = $1 AND is_active FOR UPDATE`, id).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
+	if err != nil {
+		return err
+	}
 	var active bool
-	if err := s.Pool.QueryRow(ctx,
+	if err = tx.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM borrow_requests
 		                 WHERE equipment_id = $1 AND status IN ('pending', 'approved'))`, id).Scan(&active); err != nil {
 		return err
@@ -125,6 +133,8 @@ func (s *Store) DeleteEquipment(ctx context.Context, id int64) error {
 	if active {
 		return ErrHasActiveLoans
 	}
-	_, err := s.Pool.Exec(ctx, `DELETE FROM equipment WHERE id = $1`, id)
-	return err
+	if _, err = tx.Exec(ctx, `UPDATE equipment SET is_active = false, updated_at = now() WHERE id = $1`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

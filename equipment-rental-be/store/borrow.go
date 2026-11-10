@@ -52,10 +52,18 @@ func (s *Store) getBorrow(ctx context.Context, id int64) (BorrowRequest, error) 
 }
 
 // CreateBorrowRequest สร้างคำขอสถานะ pending (ยังไม่หักสต็อก ไปหักตอน admin อนุมัติ)
+// ล็อกอุปกรณ์ (FOR UPDATE) ก่อนเช็กสต็อกและสร้างคำขอ ใน transaction เดียว
 // วันที่ตรวจรูปแบบมาแล้วที่ handler ส่งมาเป็น "YYYY-MM-DD"
 func (s *Store) CreateBorrowRequest(ctx context.Context, memberID, equipmentID int64, qty int, borrowDate, returnDate string) (BorrowRequest, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return BorrowRequest{}, err
+	}
+	defer tx.Rollback(ctx)
+
 	var avail int
-	err := s.Pool.QueryRow(ctx, `SELECT available_qty FROM equipment WHERE id = $1`, equipmentID).Scan(&avail)
+	err = tx.QueryRow(ctx,
+		`SELECT available_qty FROM equipment WHERE id = $1 AND is_active FOR UPDATE`, equipmentID).Scan(&avail)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BorrowRequest{}, ErrNotFound
 	}
@@ -66,11 +74,14 @@ func (s *Store) CreateBorrowRequest(ctx context.Context, memberID, equipmentID i
 		return BorrowRequest{}, ErrOutOfStock
 	}
 	var id int64
-	err = s.Pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`INSERT INTO borrow_requests (member_id, equipment_id, quantity, borrow_date, return_date)
 		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id`, memberID, equipmentID, qty, borrowDate, returnDate).Scan(&id)
 	if err != nil {
+		return BorrowRequest{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
 		return BorrowRequest{}, err
 	}
 	return s.getBorrow(ctx, id)
@@ -98,8 +109,33 @@ func (s *Store) ListBorrowRequests(ctx context.Context, memberID int64, status s
 	return out, rows.Err()
 }
 
+// lockForUpdate ล็อกตามลำดับเดียวกันทุกที่: อุปกรณ์ก่อน แล้วค่อยคำขอ (กัน deadlock กับ Create/Delete)
+// คืน equipment_id, quantity, status ของคำขอที่ล็อกแล้ว
+func lockForUpdate(ctx context.Context, tx pgx.Tx, id int64) (equipID int64, qty int, status string, err error) {
+	// 1) หาว่าคำขอนี้เป็นของอุปกรณ์ไหน (ยังไม่ล็อก; equipment_id ไม่เคยเปลี่ยนหลังสร้าง)
+	err = tx.QueryRow(ctx, `SELECT equipment_id FROM borrow_requests WHERE id = $1`, id).Scan(&equipID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, "", ErrNotFound
+	}
+	if err != nil {
+		return 0, 0, "", err
+	}
+	// 2) ล็อกอุปกรณ์ก่อน
+	var one int
+	if err = tx.QueryRow(ctx, `SELECT 1 FROM equipment WHERE id = $1 FOR UPDATE`, equipID).Scan(&one); err != nil {
+		return 0, 0, "", err
+	}
+	// 3) แล้วค่อยล็อกคำขอ และอ่านสถานะล่าสุดหลังได้ล็อก
+	err = tx.QueryRow(ctx,
+		`SELECT quantity, status FROM borrow_requests WHERE id = $1 FOR UPDATE`, id).Scan(&qty, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, "", ErrNotFound
+	}
+	return equipID, qty, status, err
+}
+
 // ApproveBorrow pending -> approved และหักสต็อกในธุรกรรมเดียวกัน
-// FOR UPDATE ล็อกแถวคำขอ + เงื่อนไข available_qty >= qty กันสต็อกติดลบเมื่อ admin กดพร้อมกัน
+// เงื่อนไข available_qty >= qty ใน UPDATE เป็นด่านสุดท้ายกันสต็อกติดลบ
 func (s *Store) ApproveBorrow(ctx context.Context, id, adminID int64) (BorrowRequest, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -107,15 +143,7 @@ func (s *Store) ApproveBorrow(ctx context.Context, id, adminID int64) (BorrowReq
 	}
 	defer tx.Rollback(ctx)
 
-	var equipID int64
-	var qty int
-	var status string
-	err = tx.QueryRow(ctx,
-		`SELECT equipment_id, quantity, status FROM borrow_requests WHERE id = $1 FOR UPDATE`, id).
-		Scan(&equipID, &qty, &status)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return BorrowRequest{}, ErrNotFound
-	}
+	equipID, qty, status, err := lockForUpdate(ctx, tx, id)
 	if err != nil {
 		return BorrowRequest{}, err
 	}
@@ -164,7 +192,7 @@ func (s *Store) RejectBorrow(ctx context.Context, id, adminID int64) (BorrowRequ
 	return s.getBorrow(ctx, id)
 }
 
-// ReturnBorrow approved -> returned และคืนสต็อกให้อุปกรณ์ในธุรกรรมเดียวกัน
+// ReturnBorrow approved -> returned และคืนสต็อกให้อุปกรณ์ในธุรกรรมเดียวกัน (ล็อกลำดับเดียวกับ Approve)
 func (s *Store) ReturnBorrow(ctx context.Context, id int64) (BorrowRequest, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -172,15 +200,7 @@ func (s *Store) ReturnBorrow(ctx context.Context, id int64) (BorrowRequest, erro
 	}
 	defer tx.Rollback(ctx)
 
-	var equipID int64
-	var qty int
-	var status string
-	err = tx.QueryRow(ctx,
-		`SELECT equipment_id, quantity, status FROM borrow_requests WHERE id = $1 FOR UPDATE`, id).
-		Scan(&equipID, &qty, &status)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return BorrowRequest{}, ErrNotFound
-	}
+	equipID, qty, status, err := lockForUpdate(ctx, tx, id)
 	if err != nil {
 		return BorrowRequest{}, err
 	}
@@ -214,8 +234,8 @@ type Stats struct {
 func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	var st Stats
 	err := s.Pool.QueryRow(ctx,
-		`SELECT (SELECT count(*) FROM equipment),
-		        (SELECT count(*) FROM equipment WHERE available_qty = 0),
+		`SELECT (SELECT count(*) FROM equipment WHERE is_active),
+		        (SELECT count(*) FROM equipment WHERE is_active AND available_qty = 0),
 		        (SELECT count(*) FROM members),
 		        (SELECT count(*) FROM borrow_requests WHERE status = 'pending'),
 		        (SELECT count(*) FROM borrow_requests WHERE status = 'approved')`).
