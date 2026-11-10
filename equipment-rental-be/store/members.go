@@ -20,12 +20,12 @@ type Member struct {
 	PasswordHash string     `json:"-"` // ไม่มีวันออกไปกับ JSON
 }
 
-func (s *Store) CreateMember(ctx context.Context, email, hash, name string) (Member, error) {
-	m := Member{Email: email, DisplayName: name}
+func (s *Store) CreateMember(ctx context.Context, email, hash, name, role string) (Member, error) {
+	m := Member{Email: email, DisplayName: name, Role: role}
 	err := s.Pool.QueryRow(ctx,
-		`INSERT INTO members (email, password_hash, display_name)
-		 VALUES ($1, $2, $3)
-		 RETURNING id, role`, email, hash, name).Scan(&m.ID, &m.Role)
+		`INSERT INTO members (email, password_hash, display_name, role)
+		 VALUES ($1, $2, $3, $4)
+		 RETURNING id, role`, email, hash, name, role).Scan(&m.ID, &m.Role)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return Member{}, ErrEmailTaken

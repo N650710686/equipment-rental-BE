@@ -15,9 +15,10 @@ type registerReq struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
 	DisplayName string `json:"displayName"`
+	Role        string `json:"role,omitempty"`
 }
 
-// Register สมัครสมาชิก: role เป็น member เสมอ (ตั้ง admin ผ่าน SQL เท่านั้น)
+// Register สมัครบัญชี: เลือกได้เฉพาะ guest หรือ member; admin ตั้งผ่าน SQL เท่านั้น
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerReq
 	if !readJSON(w, r, &req) {
@@ -25,6 +26,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	name := strings.TrimSpace(req.DisplayName)
+	role := strings.ToLower(strings.TrimSpace(req.Role))
+	if role == "" {
+		role = "member"
+	}
 	switch {
 	case !strings.Contains(email, "@") || len(email) > 255:
 		writeError(w, http.StatusBadRequest, "BAD_EMAIL", "รูปแบบอีเมลไม่ถูกต้อง")
@@ -35,13 +40,16 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	case name == "" || utf8.RuneCountInString(name) > 50:
 		writeError(w, http.StatusBadRequest, "BAD_NAME", "ต้องมีชื่อที่แสดง และยาวไม่เกิน 50 ตัวอักษร")
 		return
+	case role != "guest" && role != "member":
+		writeError(w, http.StatusBadRequest, "BAD_ROLE", "role ต้องเป็น guest หรือ member เท่านั้น")
+		return
 	}
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		internal(w, err)
 		return
 	}
-	m, err := h.Store.CreateMember(r.Context(), email, hash, name)
+	m, err := h.Store.CreateMember(r.Context(), email, hash, name, role)
 	if errors.Is(err, store.ErrEmailTaken) {
 		writeError(w, http.StatusConflict, "EMAIL_TAKEN", "อีเมลนี้มีบัญชีอยู่แล้ว")
 		return

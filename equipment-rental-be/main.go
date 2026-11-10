@@ -44,8 +44,9 @@ func main() {
 	tickets := &auth.Issuer{Secret: []byte(secret), TTL: time.Hour}
 	h := &handler.Handler{Store: &store.Store{Pool: pool}, Tickets: tickets}
 
-	// login = ต้องมีตั๋ว, admin = ต้องมีตั๋วและบทบาทเป็น admin (ตรวจตั๋วก่อนเสมอ ค่อยดูบทบาท)
+	// login = ต้องมีตั๋ว, member = ต้องเป็น member, admin = ต้องเป็น admin
 	login := func(next http.HandlerFunc) http.HandlerFunc { return mw.RequireLogin(tickets, next) }
+	member := func(next http.HandlerFunc) http.HandlerFunc { return login(mw.RequireRole("member", next)) }
 	admin := func(next http.HandlerFunc) http.HandlerFunc { return login(mw.RequireRole("admin", next)) }
 
 	mux := http.NewServeMux()
@@ -58,11 +59,11 @@ func main() {
 	mux.HandleFunc("GET /api/equipment", h.ListEquipment)
 	mux.HandleFunc("GET /api/equipment/{id}", h.GetEquipment)
 
-	// Member (ต้อง login)
-	mux.HandleFunc("GET /api/me", login(h.Me))
-	mux.HandleFunc("PUT /api/me/password", login(h.ChangePassword))
-	mux.HandleFunc("GET /api/me/borrow-requests", login(h.MyBorrows))
-	mux.HandleFunc("POST /api/borrow-requests", login(h.CreateBorrow))
+	// Member เท่านั้น (Guest login ได้ แต่ไม่มีสิทธิ์ใช้ Profile/ยืม/ดูประวัติ)
+	mux.HandleFunc("GET /api/me", member(h.Me))
+	mux.HandleFunc("PUT /api/me/password", member(h.ChangePassword))
+	mux.HandleFunc("GET /api/me/borrow-requests", member(h.MyBorrows))
+	mux.HandleFunc("POST /api/borrow-requests", member(h.CreateBorrow))
 
 	// Admin
 	mux.HandleFunc("GET /api/admin/stats", admin(h.AdminStats))

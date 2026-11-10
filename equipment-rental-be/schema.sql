@@ -7,7 +7,7 @@ CREATE TABLE members (
     email          VARCHAR(255)  NOT NULL,
     password_hash  VARCHAR(255)  NOT NULL,   -- bcrypt ห้ามเก็บรหัสผ่านตรง ๆ
     display_name   VARCHAR(50)   NOT NULL CHECK (char_length(btrim(display_name)) >= 1),
-    role           VARCHAR(10)   NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')),
+    role           VARCHAR(10)   NOT NULL DEFAULT 'member' CHECK (role IN ('guest', 'member', 'admin')),
     created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
