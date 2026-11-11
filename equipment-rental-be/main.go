@@ -44,9 +44,21 @@ func main() {
 	tickets := &auth.Issuer{Secret: []byte(secret), TTL: time.Hour}
 	h := &handler.Handler{Store: &store.Store{Pool: pool}, Tickets: tickets}
 
+	// อัปโหลดรูปไป Supabase Storage (ไม่ตั้งค่าก็รันได้ แต่ endpoint upload จะตอบ 503)
+	if u, k := os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_SERVICE_KEY"); u != "" && k != "" {
+		bucket := os.Getenv("SUPABASE_BUCKET")
+		if bucket == "" {
+			bucket = "equipment-images"
+		}
+		h.Images = handler.NewImageStorage(u, k, bucket)
+	} else {
+		log.Println("คำเตือน: ไม่ได้ตั้ง SUPABASE_URL/SUPABASE_SERVICE_KEY จึงอัปโหลดรูปไม่ได้")
+	}
+
 	// login = ต้องมีตั๋ว, member = ต้องเป็น member, admin = ต้องเป็น admin
 	login := func(next http.HandlerFunc) http.HandlerFunc { return mw.RequireLogin(tickets, next) }
-	member := func(next http.HandlerFunc) http.HandlerFunc { return login(mw.RequireRole("member", next)) }
+	// member = สมาชิกหรือผู้ดูแล (admin ใช้ Profile/ยืมได้ด้วย) ส่วน guest ยังใช้ไม่ได้
+	member := func(next http.HandlerFunc) http.HandlerFunc { return login(mw.RequireAnyRole(next, "member", "admin")) }
 	admin := func(next http.HandlerFunc) http.HandlerFunc { return login(mw.RequireRole("admin", next)) }
 
 	mux := http.NewServeMux()
@@ -56,6 +68,7 @@ func main() {
 	// ทุกคน (ไม่ต้อง login): ดูอุปกรณ์ + สมัคร/เข้าสู่ระบบ
 	mux.HandleFunc("POST /api/auth/register", h.Register)
 	mux.HandleFunc("POST /api/auth/login", h.Login)
+	mux.HandleFunc("GET /api/categories", h.Categories)
 	mux.HandleFunc("GET /api/equipment", h.ListEquipment)
 	mux.HandleFunc("GET /api/equipment/{id}", h.GetEquipment)
 
@@ -67,6 +80,7 @@ func main() {
 
 	// Admin
 	mux.HandleFunc("GET /api/admin/stats", admin(h.AdminStats))
+	mux.HandleFunc("POST /api/admin/upload-image", admin(h.AdminUploadImage))
 	mux.HandleFunc("POST /api/admin/equipment", admin(h.AdminCreateEquipment))
 	mux.HandleFunc("PUT /api/admin/equipment/{id}", admin(h.AdminUpdateEquipment))
 	mux.HandleFunc("DELETE /api/admin/equipment/{id}", admin(h.AdminDeleteEquipment))

@@ -17,7 +17,8 @@ CREATE TABLE equipment (
     id             BIGSERIAL     PRIMARY KEY,
     name           VARCHAR(100)  NOT NULL CHECK (char_length(btrim(name)) >= 1),
     description    TEXT,
-    category       VARCHAR(50),
+    category       VARCHAR(50)   NOT NULL DEFAULT 'อื่นๆ'
+                   CHECK (category IN ('กีฬา', 'ไอที', 'อุปกรณ์ถ่ายภาพ', 'อื่นๆ')),
     image_url      VARCHAR(500),
     total_qty      INT           NOT NULL CHECK (total_qty >= 0),      -- จำนวนทั้งหมดในคลัง
     available_qty  INT           NOT NULL CHECK (available_qty >= 0),  -- จำนวนที่ยังว่างให้ยืม

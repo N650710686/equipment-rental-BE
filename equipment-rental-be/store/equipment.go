@@ -13,11 +13,23 @@ var (
 	ErrHasActiveLoans = errors.New("equipment has active loans") // ลบไม่ได้ เพราะยังมีคำขอ pending/approved
 )
 
+// Categories หมวดหมู่ที่อนุญาต (ตรงกับ CHECK ใน schema.sql) ลำดับนี้คือลำดับที่แสดงบน FE
+var Categories = []string{"กีฬา", "ไอที", "อุปกรณ์ถ่ายภาพ", "อื่นๆ"}
+
+func ValidCategory(c string) bool {
+	for _, v := range Categories {
+		if v == c {
+			return true
+		}
+	}
+	return false
+}
+
 type Equipment struct {
 	ID           int64   `json:"id"`
 	Name         string  `json:"name"`
 	Description  *string `json:"description"`
-	Category     *string `json:"category"`
+	Category     string  `json:"category"`
 	ImageURL     *string `json:"imageUrl"`
 	TotalQty     int     `json:"totalQty"`
 	AvailableQty int     `json:"availableQty"`
@@ -27,7 +39,7 @@ type Equipment struct {
 type EquipmentInput struct {
 	Name        string
 	Description *string
-	Category    *string
+	Category    string
 	ImageURL    *string
 	TotalQty    int
 }
@@ -43,15 +55,14 @@ func scanEquipment(row scanner) (Equipment, error) {
 	return e, err
 }
 
-// ListEquipment ค้นจากชื่อหรือหมวดหมู่ (q ว่าง = ทั้งหมด) ค่าจากผู้ใช้ไปทาง $1 เสมอ
-func (s *Store) ListEquipment(ctx context.Context, q string) ([]Equipment, error) {
+// ListEquipment ค้นจากชื่อ (q) และกรองตามหมวดหมู่ (category) ว่าง = ไม่กรอง ค่าจากผู้ใช้ไปทาง $1, $2 เสมอ
+func (s *Store) ListEquipment(ctx context.Context, q, category string) ([]Equipment, error) {
 	rows, err := s.Pool.Query(ctx,
 		`SELECT `+equipCols+` FROM equipment
 		 WHERE is_active
-		   AND ($1::text = ''
-		        OR lower(name) LIKE '%' || lower($1::text) || '%'
-		        OR lower(coalesce(category, '')) LIKE '%' || lower($1::text) || '%')
-		 ORDER BY name, id`, q)
+		   AND ($2::text = '' OR category = $2::text)
+		   AND ($1::text = '' OR lower(name) LIKE '%' || lower($1::text) || '%')
+		 ORDER BY name, id`, q, category)
 	if err != nil {
 		return nil, err
 	}

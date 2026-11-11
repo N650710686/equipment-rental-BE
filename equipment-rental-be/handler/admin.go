@@ -53,15 +53,25 @@ func parseEquipment(w http.ResponseWriter, r *http.Request) (store.EquipmentInpu
 	case utf8.RuneCountInString(req.Description) > 2000:
 		writeError(w, http.StatusBadRequest, "BAD_DESCRIPTION", "รายละเอียดยาวเกิน 2000 ตัวอักษร")
 		return store.EquipmentInput{}, false
-	case utf8.RuneCountInString(req.Category) > 50 || utf8.RuneCountInString(req.ImageURL) > 500:
-		writeError(w, http.StatusBadRequest, "BAD_FIELD", "หมวดหมู่ยาวเกิน 50 หรือลิงก์รูปยาวเกิน 500 ตัวอักษร")
+	}
+	category := strings.TrimSpace(req.Category)
+	if category == "" {
+		category = "อื่นๆ"
+	}
+	if !store.ValidCategory(category) {
+		writeError(w, http.StatusBadRequest, "BAD_CATEGORY", "หมวดหมู่ต้องเป็น กีฬา, ไอที, อุปกรณ์ถ่ายภาพ หรือ อื่นๆ")
+		return store.EquipmentInput{}, false
+	}
+	imageURL := strings.TrimSpace(req.ImageURL)
+	if imageURL != "" && (!strings.HasPrefix(imageURL, "https://") || utf8.RuneCountInString(imageURL) > 500) {
+		writeError(w, http.StatusBadRequest, "BAD_IMAGE_URL", "ลิงก์รูปต้องขึ้นต้นด้วย https:// และยาวไม่เกิน 500 ตัวอักษร")
 		return store.EquipmentInput{}, false
 	}
 	return store.EquipmentInput{
 		Name:        name,
 		Description: optional(req.Description),
-		Category:    optional(req.Category),
-		ImageURL:    optional(req.ImageURL),
+		Category:    category,
+		ImageURL:    optional(imageURL),
 		TotalQty:    req.TotalQty,
 	}, true
 }
@@ -113,7 +123,7 @@ func (h *Handler) AdminDeleteEquipment(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "EQUIPMENT_NOT_FOUND", "ไม่พบอุปกรณ์นี้")
 	case errors.Is(err, store.ErrHasActiveLoans):
-		writeError(w, http.StatusConflict, "HAS_ACTIVE_LOANS", "ลบไม่ได้ ยังมีคำขอที่รออนุมัติหรือยังไม่คืนอุปกรณ์")
+		writeError(w, http.StatusConflict, "HAS_ACTIVE_LOANS", "ลบไม่ได้ ยังมีคำขอที่รออนุมัติหรือยังไม่คืนอุปกรณ์ (เมื่อลบสำเร็จ ระบบแค่ซ่อนอุปกรณ์ ประวัติการยืมยังอยู่)")
 	case err != nil:
 		internal(w, err)
 	default:

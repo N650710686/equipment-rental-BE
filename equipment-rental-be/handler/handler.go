@@ -13,6 +13,7 @@ import (
 type Handler struct {
 	Store   *store.Store
 	Tickets *auth.Issuer
+	Images  *ImageStorage // nil = ยังไม่ตั้งค่า upload
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

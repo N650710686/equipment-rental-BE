@@ -65,3 +65,17 @@ func RequireRole(role string, next http.HandlerFunc) http.HandlerFunc {
 		next(w, r)
 	}
 }
+
+// RequireAnyRole อนุญาตได้หลายบทบาท เช่น RequireAnyRole(next, "member", "admin")
+func RequireAnyRole(next http.HandlerFunc, roles ...string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cur := Role(r.Context())
+		for _, role := range roles {
+			if cur == role {
+				next(w, r)
+				return
+			}
+		}
+		fail(w, http.StatusForbidden, "FORBIDDEN", "บทบาทของคุณไม่มีสิทธิ์ใช้งานส่วนนี้")
+	}
+}
