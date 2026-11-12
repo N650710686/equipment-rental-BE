@@ -10,7 +10,7 @@ import (
 	"equipmentrental/mw"
 	"equipmentrental/store"
 )
-
+var emailRe = regexp.MustCompile(`^[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$`)
 type registerReq struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
@@ -31,8 +31,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		role = "member"
 	}
 	switch {
-	case !strings.Contains(email, "@") || len(email) > 255:
-		writeError(w, http.StatusBadRequest, "BAD_EMAIL", "รูปแบบอีเมลไม่ถูกต้อง")
+	case !emailRe.MatchString(email) || len(email) > 255:
+    writeError(w, http.StatusBadRequest, "BAD_EMAIL", "รูปแบบอีเมลไม่ถูกต้อง ต้องมี @ และโดเมน เช่น name@example.com หรือ name@example.co.th")
 		return
 	case utf8.RuneCountInString(req.Password) < 8 || len(req.Password) > 72:
 		writeError(w, http.StatusBadRequest, "BAD_PASSWORD", "รหัสผ่านต้องยาว 8 ตัวอักษรขึ้นไป และไม่เกิน 72 ไบต์")

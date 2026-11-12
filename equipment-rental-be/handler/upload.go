@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const maxImageBytes = 5 << 20 // 5MB
+const maxImageBytes = 50 << 20 // 50MB
 
 // ImageStorage อัปโหลดรูปไป Supabase Storage (bucket แบบ public) ผ่าน REST API
 // ใช้ service key ที่อยู่ฝั่ง BE เท่านั้น ห้ามส่งให้ FE
@@ -28,7 +28,7 @@ func NewImageStorage(baseURL, key, bucket string) *ImageStorage {
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		Key:     key,
 		Bucket:  bucket,
-		client:  &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
