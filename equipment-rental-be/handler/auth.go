@@ -9,6 +9,7 @@ import (
 	"equipmentrental/auth"
 	"equipmentrental/mw"
 	"equipmentrental/store"
+	"regexp"
 )
 var emailRe = regexp.MustCompile(`^[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$`)
 type registerReq struct {
